@@ -1,12 +1,16 @@
 import lightgbm
 
+from tqdm import tqdm
 from document_preprocessor import Tokenizer
 from indexing import InvertedIndex, BasicInvertedIndex
 from ranker import *
 from collections import Counter
 from pandas import DataFrame
+import pandas as pd
 import numpy as np
 import csv
+import os
+import json
 
 
 class L2RRanker:
@@ -59,7 +63,7 @@ class L2RRanker:
 
         # TODO: for each query and the documents that have been rated for relevance to that query,
         # process these query-document pairs into features
-        for query in query_to_document_relevance_scores.keys():
+        for query in tqdm(query_to_document_relevance_scores.keys()):
     
             q_term = self.document_preprocessor.tokenize(query)
             
@@ -74,7 +78,7 @@ class L2RRanker:
                 t_word_count = title_word_count[docid] if docid in title_word_count.keys() else {}
 
                 
-                features = self.feature_extractor.generate_features(docid, d_word_count, t_word_count, q_term)
+                features = self.feature_extractor.generate_features(docid, d_word_count, t_word_count, q_term, query)
                 X.append(features)
                 y.append(rel)
 
@@ -113,21 +117,66 @@ class L2RRanker:
 
         return doc_term_counts
 
-    def train(self, training_data_filename: str) -> None:
+    def output_data(self, training_data_filename: str, raw_text_filename: str, threshold: int=None) -> None:
+        raw_text_file = pd.read_csv(raw_text_filename)
+        # TODO: Convert the relevance data into the right format for training data preparation
+        query_to_document_relevance = {}
+        cnt = 0
+        with open(training_data_filename, 'r', newline='', errors='ignore') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # query = row['query']
+                cnt += 1
+                if threshold is not None and cnt > threshold: break
+                docid = int(row['job_id'])
+                query = raw_text_file[raw_text_file["ID"] == int(row['resume_id'])]["Clean_Resume"].item()
+                rel = int(float(row['rel']) * 2)
+                if query in query_to_document_relevance.keys():
+                    query_to_document_relevance[query].append((docid, rel))
+                else:
+                    query_to_document_relevance[query] = [(docid, rel)]
+
+        # TODO: prepare the training data by featurizing the query-doc pairs and
+        # getting the necessary datastructures
+        X_train, y_train, qgroups_train = self.prepare_training_data(query_to_document_relevance)
+
+        file_path = "l2r_train"
+        idx = 1
+        while os.path.exists(f'{file_path}{idx}'):
+            idx += 1
+            
+        os.makedirs(f'{file_path}{idx}', exist_ok=True)
+        data = {
+            "X_train": X_train,
+            "y_train": y_train,
+            "qgrouops_train": qgroups_train
+        } 
+        
+        # Convert and write JSON object to file
+        with open(f'{file_path}{idx}/training.json', "w") as outfile: 
+            json.dump(data, outfile, indent = 4)
+
+    def load_model(self, model_name: str) -> None:
+        self.model.load(model_name)
+
+    def train(self, training_data_filename: str, raw_text_filename: str) -> None:
         """
         Trains a LambdaMART pair-wise learning to rank model using the documents and relevance scores provided 
         in the training data file.
 
         Args:
             training_data_filename (str): a filename for a file containing documents and relevance scores
+            raw_text_filename (str)
         """
+        raw_text_file = pd.read_csv(raw_text_filename)
         # TODO: Convert the relevance data into the right format for training data preparation
         query_to_document_relevance = {}
         with open(training_data_filename, 'r', newline='', errors='ignore') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                query = row['query']
-                docid = int(row['docid'])
+                # query = row['query']
+                docid = int(row['job_id'])
+                query = raw_text_file[raw_text_file["ID"] == int(row['resume_id'])]["Clean_Resume"].item()
                 rel = int(float(row['rel']) * 2)
                 if query in query_to_document_relevance.keys():
                     query_to_document_relevance[query].append((docid, rel))
@@ -204,7 +253,7 @@ class L2RRanker:
             docid_test.append(docid)
             doc_wc = doc_word_counts[docid] if docid in doc_word_counts.keys() else {}
             title_wc = title_word_counts[docid] if docid in title_word_counts.keys() else {}
-            X_test.append(self.feature_extractor.generate_features(docid, doc_wc, title_wc, q_term))
+            X_test.append(self.feature_extractor.generate_features(docid, doc_wc, title_wc, q_term, query))
 
         # TODO: Use your L2R model to rank these top 100 documents
         results = self.model.predict(X_test)
@@ -224,7 +273,8 @@ class L2RFeatureExtractor:
                  # doc_category_info: dict[int, list[str]],
                  document_preprocessor: Tokenizer, stopwords: set[str],
                  # recognized_categories: set[str], docid_to_network_features: dict[int, dict[str, float]],
-                 ce_scorer: CrossEncoderScorer=None) -> None:
+                 ce_scorer: CrossEncoderScorer=None,
+                 skill_scorer: SkillSimilarityScorer=None) -> None:
         """
         Initializes a L2RFeatureExtractor object.
 
@@ -250,6 +300,7 @@ class L2RFeatureExtractor:
         # self.recognized_categories = recognized_categories
         # self.docid_to_network_features = docid_to_network_features
         self.ce_scorer = ce_scorer
+        self.skill_scorer = skill_scorer
 
         # # TODO: For the recognized categories (i.e,. those that are going to be features), considering
         # # how you want to store them here for faster featurizing
@@ -375,6 +426,8 @@ class L2RFeatureExtractor:
         pivoted_n = PivotedNormalization(self.document_index)
         return pivoted_n.score(docid, doc_word_counts, Counter(query_parts))
 
+    def get_skill_similarity_score(self, docid: int, query: str) -> float:
+        return self.skill_scorer.score(docid, query)
 
     # # TODO: Document Categories
     # def get_document_categories(self, docid: int) -> list:
@@ -438,7 +491,7 @@ class L2RFeatureExtractor:
         """
         Gets the cross-encoder score for the given document.
 
-Args:   
+        Args:   
             docid: The id of the document
             query: The query in its original form (no stopword filtering/tokenization)
 
@@ -447,20 +500,20 @@ Args:
         """        
         return self.ce_scorer.score(docid, query)
 
-    # TODO Add at least one new feature to be used with your L2R model.    
-    def get_my_score(self, docid: int, word_counts: dict[str, int], query_parts: list[str]) -> float:
-        if query_parts == [] or word_counts == {}: return 0
-        union = set()
-        q_terms = set(query_parts)
-        d_terms = set(word_counts.keys())
-        for q in q_terms:
-            if q in d_terms:
-                union.add(q)
+    # # TODO Add at least one new feature to be used with your L2R model.    
+    # def get_my_score(self, docid: int, word_counts: dict[str, int], query_parts: list[str]) -> float:
+    #     if query_parts == [] or word_counts == {}: return 0
+    #     union = set()
+    #     q_terms = set(query_parts)
+    #     d_terms = set(word_counts.keys())
+    #     for q in q_terms:
+    #         if q in d_terms:
+    #             union.add(q)
 
-        return len(union)/len(q_terms)
+    #     return len(union)/len(q_terms)
 
     def generate_features(self, docid: int, doc_word_counts: dict[str, int],
-                          title_word_counts: dict[str, int], query_parts: list[str]) -> list:
+                          title_word_counts: dict[str, int], query_parts: list[str],  query) -> list:
         """
         Generates a dictionary of features for a given document and query.
 
@@ -516,20 +569,20 @@ Args:
 
         # TODO: (HW3) Cross-Encoder Score
         if self.ce_scorer is not None:
-            query = ""
-            for parts in query_parts:
-                query += parts + " "
             feature_vector.append(self.get_cross_encoder_score(docid, query))
 
+        if self.skill_scorer is not None:
+            feature_vector.append(self.get_skill_similarity_score(docid, query))
+
         # TODO: Add at least one new feature to be used with your L2R model.
-        feature_vector.append(self.get_my_score(docid, title_word_counts, query_parts))
-        feature_vector.append(self.get_my_score(docid, doc_word_counts, query_parts))
+        # feature_vector.append(self.get_my_score(docid, title_word_counts, query_parts))
+        # feature_vector.append(self.get_my_score(docid, doc_word_counts, query_parts))
 
         # TODO: Calculate the Document Categories features.
         # NOTE: This should be a list of binary values indicating which categories are present.
-        document_categories = self.get_document_categories(docid)
-        feature_vector.append(len(document_categories))
-        feature_vector += document_categories
+        # document_categories = self.get_document_categories(docid)
+        # feature_vector.append(len(document_categories))
+        # feature_vector += document_categories
 
         return feature_vector
 
@@ -597,3 +650,6 @@ class LambdaMART:
 
         # TODO: Generating the predicted values using the LGBMRanker
         return self.ranker.predict(featurized_docs)
+
+    def load(self, model_name):
+        self.ranker = lightgbm.LGBMRanker(model_name=model_name)

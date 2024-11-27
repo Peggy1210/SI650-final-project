@@ -278,6 +278,49 @@ class TF_IDF(RelevanceScorer):
         # 4. Return the score
         return score
 
+from tqdm import tqdm
+from sentence_transformers import SentenceTransformer, util
+import spacy
+
+class SkillSimilarityScorer:
+    def __init__(self, skills_embeddings, docids: list, model_name: str = 'sentence-transformers/all-MiniLM-L6-v2',
+                 skill_pattern_path = "jz_skill_patterns.jsonl") -> None:
+        self.model = SentenceTransformer(model_name)
+        self.nlp = spacy.load("en_core_web_lg")
+        ruler = self.nlp.add_pipe("entity_ruler")
+        ruler.from_disk(skill_pattern_path)
+
+        # self.posting_skill_sets = {}
+        # cnt = 0
+        # for docid in tqdm(raw_text_dict.keys()):
+        #     cnt += 1
+        #     if cnt > 10: break
+        #     skills_set = self.get_skills(raw_text_dict[docid])
+        #     skills_sentence = " ".join(skills_set)
+        #     self.posting_skill_sets[docid] = self.model.encode(skills_sentence).reshape(1, -1)
+        self.posting_skill_embeddings = skills_embeddings
+        self.docids = docids
+    
+    def get_skills(self, text):
+        doc = self.nlp(text)
+        subset = []
+        for ent in doc.ents:
+            if ent.label_ == "SKILL":
+                subset.append(ent.text)
+        return subset
+
+    # def unique_skills(x):
+    #     return list(set(x))
+        
+    def score(self, docid: int, query: str) -> float:
+        skills_set = self.get_skills(query.lower())
+        skills_sentence = " ".join(skills_set)
+        query_embedding = self.model.encode(skills_sentence).reshape(1, -1)
+
+        score = util.pytorch_cos_sim(self.posting_skill_embeddings[self.docids.index(docid)], query_embedding)[0][0]
+
+        return score
+
 from sentence_transformers.cross_encoder import CrossEncoder
 
 # TODO (HW3): The CrossEncoderScorer class uses a pre-trained cross-encoder model from the Sentence Transformers package

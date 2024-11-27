@@ -80,7 +80,7 @@ def f1_score(search_result_relevances: list[float]):
 import pandas as pd
 import json
 
-def run_relevance_tests(postings_category_filename: str, resume_category_filename: str, job_category_filename: str, ranker) -> dict[str, float]:
+def run_relevance_tests(resume_filename: str, relevance_filename: str, ranker) -> dict[str, float]:
     # TODO: Implement running relevance test for the search system for multiple queries.
     """
     Measures the performance of the IR system using metrics, such as MAP and NDCG.
@@ -93,89 +93,53 @@ def run_relevance_tests(postings_category_filename: str, resume_category_filenam
     Returns:
         A dictionary containing both MAP and NDCG scores
     """
-    if postings_category_filename.endswith('.gz'):
-        postings_category = pd.read_csv(postings_category_filename, compression='gzip')
+    # Read resume raw data
+    if resume_filename.endswith('.gz'):
+        resume_data = pd.read_csv(resume_filename, compression='gzip')
     else:
-        postings_category = pd.read_csv(postings_category_filename)
+        resume_data = pd.read_csv(resume_filename)
+
+    # Read relevance score
+    if resume_filename.endswith('.gz'):
+        relevance_data = pd.read_csv(relevance_filename, compression='gzip')
+    else:
+        relevance_data = pd.read_csv(relevance_filename)
     
-    if resume_category_filename.endswith('.gz'):
-        resume_category = pd.read_csv(resume_category_filename, compression='gzip')
-    else:
-        resume_category = pd.read_csv(resume_category_filename)
-
-    with open(job_category_filename) as f:
-        job_category = json.load(f)
-
-    postings_to_category = {}
-    for i in range(len(postings_category)):
-        postings_to_category[postings_category.iloc[i]["job_id"]] = postings_category.iloc[i]["predicted"]
-    # relevance_data = pd.read_csv(relevance_data_filename, encoding = "ISO-8859-1")
-    # queries = relevance_data['query'].value_counts().keys()
-    # document_set = { query: {} for query in queries }
-    # for i in range(len(relevance_data)):
-    #     document_set[relevance_data.iloc[i]['query']][relevance_data.iloc[i]['docid']] = {
-    #         'docid': relevance_data.iloc[i]['docid'],
-    #         'rel': relevance_data.iloc[i]['rel'],
-    #         'rel-map': 1 if relevance_data.iloc[i]['rel'] > 3 else 0,
-    #     }
-
-    # NOTE: MAP requires using binary judgments of relevant (1) or not (0). You should use relevance 
-    #       scores of (1,2,3) as not-relevant, and (4,5) as relevant.
-    # NOTE: NDCG can use any scoring range, so no conversion is needed.
-
-    # TODO: For each query's result, calculate the MAP and NDCG for every single query and average them out
+    resume_ids = relevance_data['resume_id'].value_counts().keys()
+    document_set = { id: {} for id in resume_ids }
+    for i in range(len(relevance_data)):
+        document_set[relevance_data.iloc[i]['resume_id']][relevance_data.iloc[i]['job_id']] = {
+            'rel': relevance_data.iloc[i]['rel'],
+            'rel-map': 1 if relevance_data.iloc[i]['rel'] >= 3 else 0,
+        }
     map_score_list = []
     ndcg_score_list = []
-    map_loose_score_list = []
-    ndcg_loose_score_list = []
     time_list = []
-    # for query in tqdm(queries):
-    
-    for i in tqdm(range(len(resume_category))):
+    for id in tqdm(resume_ids):
         start = time.time()
-        res_list = ranker.query(resume_category.iloc[i]["Resume_str"])
-        query_cat = resume_category.iloc[i]["Category"]
+        resume_str = resume_data[resume_data["ID"] == id]["Clean_Resume"].item()
+        res_list = ranker.query(resume_str)
 
         # Get map_relevance and ndcg_relevance
         map_relevance = []
         ndcg_relevance = []
-        map_loose_relevance = []
-        ndcg_loose_relevance = []
         for (docid, score) in res_list:
-            posting_cat = postings_to_category[docid]
-            if posting_cat == query_cat:
-                map_relevance.append(1)
-                ndcg_relevance.append(5)
-                map_loose_relevance.append(1)
-                ndcg_loose_relevance.append(5)
-            elif job_category[posting_cat] == job_category[query_cat]:
+            if docid not in document_set[id].keys():
                 map_relevance.append(0)
                 ndcg_relevance.append(0)
-                map_loose_relevance.append(1)
-                ndcg_loose_relevance.append(3)
             else:
-                map_relevance.append(0)
-                ndcg_relevance.append(0)
-                map_loose_relevance.append(0)
-                ndcg_loose_relevance.append(0)
-        end = time.time()
-        time_list.append(end-start)
+                map_relevance.append(document_set[id][docid]['rel-map'])
+                ndcg_relevance.append(document_set[id][docid]['rel'])
+
         map_score_list.append(map_score(map_relevance))
         ndcg_score_list.append(ndcg_score(ndcg_relevance, sorted(ndcg_relevance, reverse=True)))
-        map_loose_score_list.append(map_score(map_loose_relevance))
-        ndcg_loose_score_list.append(ndcg_score(ndcg_loose_relevance, sorted(ndcg_loose_relevance, reverse=True)))
-    
+        end = time.time()
+        time_list.append(end-start)
         
-    # # TODO: Compute the average MAP and NDCG across all queries and return the scores
-    # # NOTE: You should also return the MAP and NDCG scores for each query in a list
     return { 
              'map': sum(map_score_list)/len(map_score_list),
              'ndcg': sum(ndcg_score_list)/len(ndcg_score_list),
              'map_list': map_score_list,
              'ndcg_list': ndcg_score_list,
-             'map_loose': sum(map_loose_score_list)/len(map_loose_score_list),
-             'ndcg_loose': sum(ndcg_loose_score_list)/len(ndcg_loose_score_list),
-             'map_loose_list': map_loose_score_list,
-             'ndcg_loose_list': ndcg_loose_score_list,
              'time': time_list
             }

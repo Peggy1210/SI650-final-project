@@ -54,7 +54,7 @@ class VectorRanker(Ranker):
         # TODO: Score the similarity of the query vector and document vectors for relevance
         # Calculate the dot products between the query embedding and all document embeddings
         # similarities = self.biencoder_model.similarity(q_embedding, self.encoded_docs).numpy()[0]
-        similarities = util.pytorch_cos_sim(q_embedding, self.encoded_docs).numpy()[0]
+        similarities = util.dot_score(q_embedding, self.encoded_docs).numpy().flatten()
         
         # TODO: Generate the ordered list of (document id, score) tuples
         scores = {}
