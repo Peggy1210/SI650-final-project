@@ -31,7 +31,7 @@ class Ranker:
         self.stopwords = stopwords
         self.raw_text_dict = raw_text_dict
 
-    def query(self, query: str) -> list[tuple[int, float]]:
+    def query(self, query: str, feedback: dict[int, int] = None) -> list[tuple[int, float]]:
         """
         Searches the collection for relevant documents to the query and
         returns a list of documents ordered by their relevance (most relevant first).
@@ -49,6 +49,11 @@ class Ranker:
         """
         # 1. Tokenize query
         tokens = self.tokenize(query)
+        updated_query_counts = Counter(tokens)
+
+        if feedback:
+            updated_query_counts = self.rocchio(tokens, feedback) # where does this get used?
+            tokens = set(updated_query_counts.keys())
 
         # 2. Fetch a list of possible documents from the index
         docs = {}
@@ -66,11 +71,58 @@ class Ranker:
         # 2. Run RelevanceScorer (like BM25 from below classes) (implemented as relevance classes)
         scores = {}
         for docid in docs.keys():
-            score = self.scorer.score(docid, docs[docid], Counter(tokens))
+            score = self.scorer.score(docid, docs[docid], updated_query_counts)
             scores[docid] = score
 
         # 3. Return **sorted** results as format [{docid: 100, score:0.5}, {{docid: 10, score:0.2}}]
         return sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    
+    def rocchio(self, query_tokens, feedback):
+        alpha = 1
+        beta = 0.75
+        gamma = 0.15
+
+        num_relevant = 0
+        num_non_relevant = 0
+            
+        feedback_word_counts_relevant = {}
+        feedback_word_counts_non_relevant = {}
+        for docid in feedback.keys():
+            if feedback[docid] == 1:
+                num_relevant += 1
+            else:
+                num_non_relevant += 1
+            doc_str = self.raw_text_dict[docid]
+            doc_tokens = self.tokenize(doc_str)
+            doc_word_counts = Counter(doc_tokens)
+            for word, count in doc_word_counts.items():
+                word = word.lower() if word not in self.stopwords else None
+                if word is None: continue
+                if feedback[docid] == 1:
+                    if word in feedback_word_counts_relevant.keys():
+                        feedback_word_counts_relevant[word] += count
+                    else:
+                        feedback_word_counts_relevant[word] = count
+                else:
+                    if word in feedback_word_counts_non_relevant.keys():
+                        feedback_word_counts_non_relevant[word] += count
+                    else:
+                        feedback_word_counts_non_relevant[word] = count
+
+        query_word_counts = Counter(query_tokens)
+        updated_query_counts = {}
+        bag_of_words = set(query_tokens) | set(feedback_word_counts_relevant.keys()) | set(feedback_word_counts_non_relevant.keys())
+        for word in bag_of_words:
+            if word not in query_word_counts.keys():
+                query_word_counts[word] = 0
+            if word not in feedback_word_counts_relevant.keys():
+                feedback_word_counts_relevant[word] = 0
+            if word not in feedback_word_counts_non_relevant.keys():
+                feedback_word_counts_non_relevant[word] = 0
+            updated_query_counts[word] = alpha * query_word_counts[word] + beta * (feedback_word_counts_relevant[word] / num_relevant) - gamma * (feedback_word_counts_non_relevant[word] / num_non_relevant)
+
+        return updated_query_counts
+
 
 
 class RelevanceScorer:

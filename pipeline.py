@@ -267,14 +267,14 @@ class SearchEngine(BaseSearchEngine):
             self.pipeline.train(RELEVANCE_TRAIN_PATH, RESUME_PATH)
             self.l2r = True
 
-    def search(self, query: str) -> list[SearchResponse]:
+    def search(self, query: str, feedback: dict[int, int] = None) -> list[SearchResponse]:
         # 1. Use the ranker object to query the search pipeline
         # 2. This is example code and may not be correct.
-        results = self.pipeline.query(query)
+        results = self.pipeline.query(query, feedback)
         if results == []: return []
         return [SearchResponse(id=idx+1, docid=result[0], score=result[1]) for idx, result in enumerate(results)]
     
-    def search_pdf(self, filename: str) -> list[SearchResponse]:
+    def search_pdf(self, filename: str, feedback: dict[int, int] = None) -> list[SearchResponse]:
         # 1. Use the ranker object to query the search pipeline
         # 2. This is example code and may not be correct.
         if not os.path.exists(filename): return []
@@ -284,7 +284,7 @@ class SearchEngine(BaseSearchEngine):
         for page in reader.pages:
             query += page.extract_text() + " "
 
-        results = self.pipeline.query(query)
+        results = self.pipeline.query(query, feedback)
         if results == []: return []
         return [SearchResponse(id=idx+1, docid=result[0], score=result[1]) for idx, result in enumerate(results)]
 
@@ -322,7 +322,7 @@ def printSearchResponse(raw_data, results: SearchResponse, num_display=5):
         postingFormat(raw_data, docid)
 
 def interactive(**args):
-    search_obj = SearchEngine(args)
+    search_obj = SearchEngine(**args)
     raw_data = pd.read_csv(POSTINGS_CATEGORY_PATH)
 
 
@@ -338,8 +338,24 @@ def interactive(**args):
             elif mode == "pdf":
                 query = input("Enter your resume file path: ")
                 results = search_obj.search_pdf(query)
-            
+                
             printSearchResponse(raw_data, results)
+                
+            while True:
+                ans = input("Provide feedback to get more relevant results? (Y/N): ")
+                if ans != "Y": break
+                feedback = input("Input feedback in order (Relevant = 1, Non-Relevant = 0)")
+
+                feedback_dict = {}
+                for i, char in enumerate(feedback):
+                    feedback_dict[results[i].docid] = int(char)
+
+                if mode == "text":
+                    updated_results = search_obj.search(query, feedback_dict)
+                elif mode == "pdf":
+                    updated_results = search_obj.search_pdf(query, feedback_dict)
+
+                printSearchResponse(raw_data, updated_results)
 
             ans = input("End the program? (Y/N): ")
             if ans == "Y": break

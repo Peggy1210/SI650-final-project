@@ -1,10 +1,10 @@
 from sentence_transformers import SentenceTransformer, util
-from numpy import ndarray
+import numpy as np
 from ranker import Ranker
 
 
 class VectorRanker(Ranker):
-    def __init__(self, bi_encoder_model_name: str, encoded_docs: ndarray,
+    def __init__(self, bi_encoder_model_name: str, encoded_docs: np.ndarray,
                  row_to_docid: list[int]) -> None:
         """
         Initializes a VectorRanker object.
@@ -28,8 +28,9 @@ class VectorRanker(Ranker):
         # self.embedding = zip(encoded_docs, row_to_docid)
         self.encoded_docs = encoded_docs
         self.row_to_docid = row_to_docid
+        self.docid_to_row = {docid: idx for idx, docid in enumerate(row_to_docid)}
 
-    def query(self, query: str) -> list[tuple[int, float]]:
+    def query(self, query: str, feedback: dict[int, int] = None) -> list[tuple[int, float]]:
         """
         Encodes the query and then scores the relevance of the query with all the documents.
 
@@ -51,6 +52,9 @@ class VectorRanker(Ranker):
         # TODO: Encode the query using the bi-encoder
         q_embedding = self.biencoder_model.encode(query)
 
+        if feedback:
+            q_embedding = self.rocchio(q_embedding, feedback)
+
         # TODO: Score the similarity of the query vector and document vectors for relevance
         # Calculate the dot products between the query embedding and all document embeddings
         # similarities = self.biencoder_model.similarity(q_embedding, self.encoded_docs).numpy()[0]
@@ -64,5 +68,36 @@ class VectorRanker(Ranker):
         # TODO: Sort the list so most relevant are first
         return sorted(scores.items(), key=lambda item: item[1], reverse=True)
         # return sorted(scores, key=lambda item: item[1], reverse=True)
+
+
+
+    def rocchio(self, query_embedding: np.ndarray, feedback: dict[int, int]) -> np.ndarray:
+
+        alpha = 1.0
+        beta = 0.75
+        gamma = 0.15
+
+        relevant_embeddings = []
+        non_relevant_embeddings = []
+
+        for docid, rel in feedback.items():
+            if rel == 1:
+                relevant_embeddings.append(self.encoded_docs[self.docid_to_row[docid]])
+            elif rel == 0:
+                non_relevant_embeddings.append(self.encoded_docs[self.docid_to_row[docid]])
+
+        if relevant_embeddings:
+            mean_relevant = np.mean(relevant_embeddings, axis=0)
+        else:
+            mean_relevant = np.zeros_like(query_embedding)
+
+        if non_relevant_embeddings:
+            mean_non_relevant = np.mean(non_relevant_embeddings, axis=0)
+        else:
+            mean_non_relevant = np.zeros_like(query_embedding)
+
+        updated_query = alpha * query_embedding + beta * mean_relevant - gamma * mean_non_relevant
+
+        return updated_query
 
 

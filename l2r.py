@@ -211,7 +211,7 @@ class L2RRanker:
         # TODO: Return a prediction made using the LambdaMART model
         return self.model.predict(X)
 
-    def query(self, query: str) -> list[tuple[int, float]]:
+    def query(self, query: str, feedback: dict[int, int] = None) -> list[tuple[int, float]]:
         """
         Retrieves potentially-relevant documents, constructs feature vectors for each query-document pair,
         uses the L2R model to rank these documents, and returns the ranked documents.
@@ -240,7 +240,7 @@ class L2RRanker:
         
         # TODO: Score and sort the documents by the provided scrorer for just the document's main text (not the title)
         # This ordering determines which documents we will try to *re-rank* using our L2R model
-        scores = self.ranker.query(query)
+        scores = self.ranker.query(query, feedback)
 
         # TODO: Filter to just the top 100 documents for the L2R part for re-ranking
         FILTERED_INDEX = 100
