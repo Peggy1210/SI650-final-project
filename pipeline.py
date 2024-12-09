@@ -38,6 +38,7 @@ DOC_IDS_PATH = DATA_PATH + 'job_posting_ids.txt'
 LLM_CLASSIFIER_PATH = '../posting_classifier/models/job_classification_11091504'
 SKILLS_EMBEDDINGS_PATH = DATA_PATH + 'skills_embeddings.npy'
 RESUME_PATH = DATA_PATH + 'resume_data.csv'
+COMPANY_RATINGS_PATH = DATA_PATH + 'company_reviews.csv'
 
 TITLE_INDEXING_DIR = DATA_PATH + 'index-title'
 MAIN_INDEXING_DIR = DATA_PATH + 'index-description_mwf10'
@@ -257,10 +258,36 @@ class SearchEngine(BaseSearchEngine):
                             self.cemodel,
                             self.skill_scorer
                         )
+            
+            print(' - initializing company ratings dict')
+
+            company_ratings = {}
+            company_reviews = pd.read_csv(COMPANY_RATINGS_PATH, sep=';')
+            for idx, row in company_reviews.iterrows():
+                if pd.isna(row['name']) or pd.isna(row['rating']):
+                    continue
+                name = row['name'].lower()
+                name = ''.join(char for char in name if char.isalnum())
+                rating = round(float(row['rating']) / 5, 2)
+                company_ratings[name] = rating
+
+            self.docid_to_company_rating = {}
+            with jsonlines.open(DATASET_PATH) as f:
+                for doc in tqdm(f):
+                    if pd.isna(doc['company_name']):
+                        continue
+                    name = doc['company_name'].lower()
+                    name = ''.join(char for char in name if char.isalnum())
+                    if name in company_ratings:
+                        self.docid_to_company_rating[doc['job_id']] = company_ratings[name]
+
+
+            print('Ratings for', len(self.docid_to_company_rating), 'companies loaded.')
+
 
             self.pipeline = L2RRanker(
                 self.main_index, self.title_index, self.preprocessor,
-                self.stopwords, self.ranker, self.fe
+                self.stopwords, self.ranker, self.fe, self.docid_to_company_rating
             )
 
             print('Training L2R ranker...')

@@ -16,7 +16,7 @@ import json
 class L2RRanker:
     def __init__(self, document_index: InvertedIndex, title_index: InvertedIndex,
                  document_preprocessor: Tokenizer, stopwords: set[str], ranker: Ranker,
-                 feature_extractor: 'L2RFeatureExtractor') -> None:
+                 feature_extractor: 'L2RFeatureExtractor', docid_to_company_rating) -> None:
         """
         Initializes a L2RRanker model.
 
@@ -35,6 +35,7 @@ class L2RRanker:
         self.stopwords = stopwords
         self.ranker = ranker
         self.feature_extractor = feature_extractor
+        self.docid_to_company_rating = docid_to_company_rating
 
         # TODO: Initialize the LambdaMART model (but don't train it yet)
         self.model = LambdaMART() # This should a LambdaMART object
@@ -264,8 +265,30 @@ class L2RRanker:
         # TODO: Make sure to add back the other non-top-100 documents that weren't re-ranked
         results += scores[FILTERED_INDEX:]
 
+        # rerank based on company ratings
+        results = self.rerank_from_ratings(results)
+
         # TODO: Return the ranked documents
         return results
+    
+    def rerank_from_ratings(self, results, top_n=20, alpha=0.1) -> list[tuple[int, float]]:
+        """
+        Reranks the results based on company ratings.
+        """
+
+        top_n = min(top_n, len(results))
+        top_n_results = results[:top_n]
+        reranked_results = []
+        for docid, score in top_n_results:
+            if docid in self.docid_to_company_rating and self.docid_to_company_rating[docid] >= 0.7:
+                score = score * (1 + alpha * self.docid_to_company_rating[docid])
+            reranked_results.append((docid, score))
+        
+        reranked_results = sorted(reranked_results, key=lambda x: x[1], reverse=True)
+        reranked_results += results[top_n:]
+
+        return reranked_results
+
 
 
 class L2RFeatureExtractor:
