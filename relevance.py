@@ -80,7 +80,7 @@ def f1_score(search_result_relevances: list[float]):
 import pandas as pd
 import json
 
-def run_relevance_tests(resume_filename: str, relevance_filename: str, ranker) -> dict[str, float]:
+def run_relevance_tests(resume_filename: str, relevance_filename: str, ranker, key="rel") -> dict[str, float]:
     # TODO: Implement running relevance test for the search system for multiple queries.
     """
     Measures the performance of the IR system using metrics, such as MAP and NDCG.
@@ -109,8 +109,8 @@ def run_relevance_tests(resume_filename: str, relevance_filename: str, ranker) -
     document_set = { id: {} for id in resume_ids }
     for i in range(len(relevance_data)):
         document_set[relevance_data.iloc[i]['resume_id']][relevance_data.iloc[i]['job_id']] = {
-            'rel': relevance_data.iloc[i]['rel'],
-            'rel-map': 1 if relevance_data.iloc[i]['rel'] >= 3 else 0,
+            'rel': relevance_data.iloc[i][key],
+            'rel-map': 1 if relevance_data.iloc[i][key] >= 3 else 0,
         }
     map_score_list = []
     ndcg_score_list = []

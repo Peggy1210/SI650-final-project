@@ -6,6 +6,7 @@ from indexing import InvertedIndex, BasicInvertedIndex
 from ranker import *
 from collections import Counter
 from pandas import DataFrame
+from transformers import pipeline
 import pandas as pd
 import numpy as np
 import csv
@@ -40,7 +41,7 @@ class L2RRanker:
         # TODO: Initialize the LambdaMART model (but don't train it yet)
         self.model = LambdaMART() # This should a LambdaMART object
 
-    def prepare_training_data(self, query_to_document_relevance_scores: dict[str, list[tuple[int, int]]]):
+    def prepare_training_data(self, query_to_document_relevance_scores: dict[str, list[tuple[int, int]]], process_data_path):
         """
         Prepares the training data for the learning-to-rank algorithm.
 
@@ -64,7 +65,7 @@ class L2RRanker:
 
         # TODO: for each query and the documents that have been rated for relevance to that query,
         # process these query-document pairs into features
-        for query in tqdm(query_to_document_relevance_scores.keys()):
+        for i, query in tqdm(enumerate(query_to_document_relevance_scores.keys()), total=len(query_to_document_relevance_scores.keys())):
     
             q_term = self.document_preprocessor.tokenize(query)
             
@@ -85,7 +86,19 @@ class L2RRanker:
 
             # TODO: Make sure to keep track of how many scores we have for this query in qrels
             qgroups.append(len(query_to_document_relevance_scores[query]))
+
+            if i % 50 == 0:
+                self.save_data(X, y, qgroups, process_data_path)
+
+        self.save_data(X, y, qgroups, process_data_path)
+            
         return X, y, qgroups
+
+    def save_data(self, X_train, y_train, qgroups, process_data_filepath):
+        os.makedirs(process_data_filepath, exist_ok=True)
+        np.save(f'{process_data_filepath}/X_train.npy', X_train)
+        np.save(f'{process_data_filepath}/y_train.npy', y_train)
+        np.save(f'{process_data_filepath}/qgroups.npy', qgroups)
 
     @staticmethod
     def accumulate_doc_term_counts(index: InvertedIndex, query_parts: list[str]) -> dict[int, dict[str, int]]:
@@ -118,49 +131,49 @@ class L2RRanker:
 
         return doc_term_counts
 
-    def output_data(self, training_data_filename: str, raw_text_filename: str, threshold: int=None) -> None:
-        raw_text_file = pd.read_csv(raw_text_filename)
-        # TODO: Convert the relevance data into the right format for training data preparation
-        query_to_document_relevance = {}
-        cnt = 0
-        with open(training_data_filename, 'r', newline='', errors='ignore') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                # query = row['query']
-                cnt += 1
-                if threshold is not None and cnt > threshold: break
-                docid = int(row['job_id'])
-                query = raw_text_file[raw_text_file["ID"] == int(row['resume_id'])]["Clean_Resume"].item()
-                rel = int(float(row['rel']) * 2)
-                if query in query_to_document_relevance.keys():
-                    query_to_document_relevance[query].append((docid, rel))
-                else:
-                    query_to_document_relevance[query] = [(docid, rel)]
+    # def output_data(self, training_data_filename: str, raw_text_filename: str, threshold: int=None) -> None:
+    #     raw_text_file = pd.read_csv(raw_text_filename)
+    #     # TODO: Convert the relevance data into the right format for training data preparation
+    #     query_to_document_relevance = {}
+    #     cnt = 0
+    #     with open(training_data_filename, 'r', newline='', errors='ignore') as f:
+    #         reader = csv.DictReader(f)
+    #         for row in reader:
+    #             # query = row['query']
+    #             cnt += 1
+    #             if threshold is not None and cnt > threshold: break
+    #             docid = int(row['job_id'])
+    #             query = raw_text_file[raw_text_file["ID"] == int(row['resume_id'])]["Clean_Resume"].item()
+    #             rel = int(float(row['rel']) * 2)
+    #             if query in query_to_document_relevance.keys():
+    #                 query_to_document_relevance[query].append((docid, rel))
+    #             else:
+    #                 query_to_document_relevance[query] = [(docid, rel)]
 
-        # TODO: prepare the training data by featurizing the query-doc pairs and
-        # getting the necessary datastructures
-        X_train, y_train, qgroups_train = self.prepare_training_data(query_to_document_relevance)
+    #     # TODO: prepare the training data by featurizing the query-doc pairs and
+    #     # getting the necessary datastructures
+    #     X_train, y_train, qgroups_train = self.prepare_training_data(query_to_document_relevance)
 
-        file_path = "l2r_train"
-        idx = 1
-        while os.path.exists(f'{file_path}{idx}'):
-            idx += 1
+    #     file_path = "l2r_train"
+    #     idx = 1
+    #     while os.path.exists(f'{file_path}{idx}'):
+    #         idx += 1
             
-        os.makedirs(f'{file_path}{idx}', exist_ok=True)
-        data = {
-            "X_train": X_train,
-            "y_train": y_train,
-            "qgrouops_train": qgroups_train
-        } 
+    #     os.makedirs(f'{file_path}{idx}', exist_ok=True)
+    #     data = {
+    #         "X_train": X_train,
+    #         "y_train": y_train,
+    #         "qgrouops_train": qgroups_train
+    #     } 
         
-        # Convert and write JSON object to file
-        with open(f'{file_path}{idx}/training.json', "w") as outfile: 
-            json.dump(data, outfile, indent = 4)
+    #     # Convert and write JSON object to file
+    #     with open(f'{file_path}{idx}/training.json', "w") as outfile: 
+    #         json.dump(data, outfile, indent = 4)
 
-    def load_model(self, model_name: str) -> None:
-        self.model.load(model_name)
+    # def load_model(self, model_name: str) -> None:
+    #     self.model.load(model_name)
 
-    def train(self, training_data_filename: str, raw_text_filename: str) -> None:
+    def train(self, training_data_filename: str, raw_text_filename: str, process_data_path: str = "l2r_training_data") -> None:
         """
         Trains a LambdaMART pair-wise learning to rank model using the documents and relevance scores provided 
         in the training data file.
@@ -169,25 +182,33 @@ class L2RRanker:
             training_data_filename (str): a filename for a file containing documents and relevance scores
             raw_text_filename (str)
         """
-        raw_text_file = pd.read_csv(raw_text_filename)
-        # TODO: Convert the relevance data into the right format for training data preparation
-        query_to_document_relevance = {}
-        with open(training_data_filename, 'r', newline='', errors='ignore') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                # query = row['query']
-                docid = int(row['job_id'])
-                query = raw_text_file[raw_text_file["ID"] == int(row['resume_id'])]["Clean_Resume"].item()
-                rel = int(float(row['rel']) * 2)
-                if query in query_to_document_relevance.keys():
-                    query_to_document_relevance[query].append((docid, rel))
-                else:
-                    query_to_document_relevance[query] = [(docid, rel)]
+        if os.path.exists(process_data_path):
+            print("load training data from path...")
+            X_train = np.load(f'{process_data_path}/X_train.npy')
+            y_train = np.load(f'{process_data_path}/y_train.npy')
+            qgroups_train = np.load(f'{process_data_path}/qgroups.npy')
+        else:
+            print("creating training data...")
+            raw_text_file = pd.read_csv(raw_text_filename)
+            # TODO: Convert the relevance data into the right format for training data preparation
+            query_to_document_relevance = {}
+            with open(training_data_filename, 'r', newline='', errors='ignore') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # query = row['query']
+                    docid = int(row['job_id'])
+                    query = raw_text_file[raw_text_file["ID"] == int(row['resume_id'])]["Clean_Resume"].item()
+                    rel = int(float(row['rel']) * 2)
+                    if query in query_to_document_relevance.keys():
+                        query_to_document_relevance[query].append((docid, rel))
+                    else:
+                        query_to_document_relevance[query] = [(docid, rel)]
+    
+            # TODO: prepare the training data by featurizing the query-doc pairs and
+            # getting the necessary datastructures
+            X_train, y_train, qgroups_train = self.prepare_training_data(query_to_document_relevance, process_data_path)
 
-        # TODO: prepare the training data by featurizing the query-doc pairs and
-        # getting the necessary datastructures
-        X_train, y_train, qgroups_train = self.prepare_training_data(query_to_document_relevance)
-        
+        print("training...")
         # TODO: Train the model
         self.model.fit(X_train, y_train, qgroups_train)
 
@@ -293,11 +314,12 @@ class L2RRanker:
 
 class L2RFeatureExtractor:
     def __init__(self, document_index: InvertedIndex, title_index: InvertedIndex,
-                 # doc_category_info: dict[int, list[str]],
+                 doc_category_info: dict[int, list[str]],
                  document_preprocessor: Tokenizer, stopwords: set[str],
                  # recognized_categories: set[str], docid_to_network_features: dict[int, dict[str, float]],
                  ce_scorer: CrossEncoderScorer=None,
-                 skill_scorer: SkillSimilarityScorer=None) -> None:
+                 skill_scorer: SkillSimilarityScorer=None,
+                 classifier_model_name: str=None, label2id: dict[str, int]=None, label2cat: dict[str, str]=None, fields: list[str]=None) -> None:
         """
         Initializes a L2RFeatureExtractor object.
 
@@ -317,30 +339,20 @@ class L2RFeatureExtractor:
         # TODO: Set the initial state using the arguments
         self.document_index = document_index
         self.title_index = title_index
-        # self.doc_category_info = doc_category_info
+        self.doc_category_info = doc_category_info
         self.document_preprocessor = document_preprocessor
         self.stopwords = stopwords
         # self.recognized_categories = recognized_categories
         # self.docid_to_network_features = docid_to_network_features
         self.ce_scorer = ce_scorer
         self.skill_scorer = skill_scorer
-
-        # # TODO: For the recognized categories (i.e,. those that are going to be features), considering
-        # # how you want to store them here for faster featurizing
-        # self.doc_category = {}
-        # for docid in doc_category_info:
-        #     category = []
-        #     for c in recognized_categories:
-        #         if c in doc_category_info[docid]:
-        #             category.append(1)
-        #         else:
-        #             category.append(0)
-
-        #     self.doc_category[docid] = category
-
-        # TODO (HW2): Initialize any RelevanceScorer objects you need to support the methods below.
-        #             Be sure to use the right InvertedIndex object when scoring.
-
+        if classifier_model_name:
+            self.classifier = pipeline("text-classification", model=classifier_model_name, device='cpu')
+            self.label2id = label2id
+            self.label2cat = label2cat
+            self.fields = fields
+        else:
+            self.classifier = None
     # TODO: Article Length
     def get_article_length(self, docid: int) -> int:
         """
@@ -452,21 +464,21 @@ class L2RFeatureExtractor:
     def get_skill_similarity_score(self, docid: int, query: str) -> float:
         return self.skill_scorer.score(docid, query)
 
-    # # TODO: Document Categories
-    # def get_document_categories(self, docid: int) -> list:
-    #     """
-    #     Generates a list of binary features indicating which of the recognized categories that the document has.
-    #     Category features should be deterministically ordered so list[0] should always correspond to the same
-    #     category. For example, if a document has one of the three categories, and that category is mapped to
-    #     index 1, then the binary feature vector would look like [0, 1, 0].
+    # TODO: Document Categories
+    def get_document_categories(self, docid: int) -> list:
+        """
+        Generates a list of binary features indicating which of the recognized categories that the document has.
+        Category features should be deterministically ordered so list[0] should always correspond to the same
+        category. For example, if a document has one of the three categories, and that category is mapped to
+        index 1, then the binary feature vector would look like [0, 1, 0].
 
-    #     Args:
-    #         docid: The id of the document
+        Args:
+            docid: The id of the document
 
-    #     Returns:
-    #         A list containing binary list of which recognized categories that the given document has.
-    #     """
-    #     return self.doc_category[docid]
+        Returns:
+            A list containing binary list of which recognized categories that the given document has.
+        """
+        return self.doc_category_info[docid]
 
     # # TODO Pagerank score
     # def get_pagerank_score(self, docid: int) -> float:
@@ -523,17 +535,10 @@ class L2RFeatureExtractor:
         """        
         return self.ce_scorer.score(docid, query)
 
-    # # TODO Add at least one new feature to be used with your L2R model.    
-    # def get_my_score(self, docid: int, word_counts: dict[str, int], query_parts: list[str]) -> float:
-    #     if query_parts == [] or word_counts == {}: return 0
-    #     union = set()
-    #     q_terms = set(query_parts)
-    #     d_terms = set(word_counts.keys())
-    #     for q in q_terms:
-    #         if q in d_terms:
-    #             union.add(q)
-
-    #     return len(union)/len(q_terms)
+    def get_query_category(self, query):
+        cls = self.classifier(query[:512])[0]["label"]
+        return [1 if i == self.label2id[cls] else 0 for i in range(len(self.label2id))] + \
+                 [1 if self.label2cat[cls] == self.fields[i] else 0 for i in range(len(self.fields))]
 
     def generate_features(self, docid: int, doc_word_counts: dict[str, int],
                           title_word_counts: dict[str, int], query_parts: list[str],  query) -> list:
@@ -597,15 +602,12 @@ class L2RFeatureExtractor:
         if self.skill_scorer is not None:
             feature_vector.append(self.get_skill_similarity_score(docid, query))
 
-        # TODO: Add at least one new feature to be used with your L2R model.
-        # feature_vector.append(self.get_my_score(docid, title_word_counts, query_parts))
-        # feature_vector.append(self.get_my_score(docid, doc_word_counts, query_parts))
+        if self.classifier is not None:
+            feature_vector += self.get_query_category(query)
 
         # TODO: Calculate the Document Categories features.
         # NOTE: This should be a list of binary values indicating which categories are present.
-        # document_categories = self.get_document_categories(docid)
-        # feature_vector.append(len(document_categories))
-        # feature_vector += document_categories
+        feature_vector += self.get_document_categories(docid)
 
         return feature_vector
 

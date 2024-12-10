@@ -220,11 +220,12 @@ class DirichletLM(RelevanceScorer):
 
 # TODO Implement BM25
 class BM25(RelevanceScorer):
-    def __init__(self, index: InvertedIndex, parameters: dict = {'b': 0.75, 'k1': 1.2, 'k3': 8}) -> None:
+    def __init__(self, index: InvertedIndex, parameters: dict = {'b': 0.75, 'k1': 1.2, 'k3': 8, 'threshold': 0}) -> None:
         self.index = index
         self.b = parameters['b']
         self.k1 = parameters['k1']
         self.k3 = parameters['k3']
+        self.threshold = parameters['threshold']
 
     def score(self, docid: int, doc_word_counts: dict[str, int], query_word_counts: dict[str, int]) -> float:
         # 1. Get necessary information from index
@@ -236,6 +237,7 @@ class BM25(RelevanceScorer):
         b = self.b
         k1 = self.k1
         k3 = self.k3
+        threshold = self.threshold
 
         # 2. Find the dot product of the word count vector of the document and the word count vector of the query
 
@@ -250,7 +252,7 @@ class BM25(RelevanceScorer):
                 else:
                     doc_tf = 0
 
-                if doc_tf > 0:
+                if doc_tf > threshold:
                     query_tf = query_word_counts[q_term]
                     idf = np.log((n_doc - df_w + 0.5)/(df_w + 0.5))
                     tf =  ((k1 + 1) * doc_tf)/(k1 * (1-b+b*(doc_len/avg_dl)) + doc_tf)
@@ -369,7 +371,7 @@ class SkillSimilarityScorer:
         skills_sentence = " ".join(skills_set)
         query_embedding = self.model.encode(skills_sentence).reshape(1, -1)
 
-        score = util.pytorch_cos_sim(self.posting_skill_embeddings[self.docids.index(docid)], query_embedding)[0][0]
+        score = util.pytorch_cos_sim(self.posting_skill_embeddings[self.docids.index(docid)], query_embedding)[0][0].item()
 
         return score
 
