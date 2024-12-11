@@ -32,8 +32,7 @@ CACHE_PATH = '__cache__/'
 DATASET_PATH = DATA_PATH + 'postings_dataset.jsonl'
 POSTINGS_CATEGORY_PATH = DATA_PATH + 'predicted_postings.csv.gz'
 JOB_CATEGORY_PATH = DATA_PATH + 'job_categories.json'
-RELEVANCE_TRAIN_PATH = DATA_PATH + 'train_rel_temp.csv'
-TRAIN_NPY_PATH = DATA_PATH + ""
+RELEVANCE_TRAIN_PATH = DATA_PATH + 'train_relevance.csv'
 ENCODED_DOCUMENT_EMBEDDINGS_NPY_PATH = DATA_PATH + 'description_embeddings.all-MiniLM-L6-v2.npy'
 AUGMENTED_ENCODED_DOCUMENT_EMBEDDINGS_NPY_PATH = DATA_PATH + 'augmented_description_embeddings.all-MiniLM-L6-v2.npy'
 DOC_IDS_PATH = DATA_PATH + 'job_posting_ids.txt'
@@ -216,31 +215,31 @@ class SearchEngine(BaseSearchEngine):
                             self.skill_scorer,
                             LLM_CLASSIFIER_PATH, label2id, label2cat, fields
                         )
-            
-            print(' - initializing company ratings dict')
 
-            company_ratings = {}
-            company_reviews = pd.read_csv(COMPANY_RATINGS_PATH, sep=';')
-            for idx, row in company_reviews.iterrows():
-                if pd.isna(row['name']) or pd.isna(row['rating']):
-                    continue
-                name = row['name'].lower()
-                name = ''.join(char for char in name if char.isalnum())
-                rating = round(float(row['rating']) / 5, 2)
-                company_ratings[name] = rating
-
-            self.docid_to_company_rating = {}
-            with jsonlines.open(DATASET_PATH) as f:
-                for doc in tqdm(f):
-                    if pd.isna(doc['company_name']):
+            if self.company_ratings:
+                print(' - initializing company ratings dict')
+                company_ratings = {}
+                company_reviews = pd.read_csv(COMPANY_RATINGS_PATH, sep=';')
+                for idx, row in company_reviews.iterrows():
+                    if pd.isna(row['name']) or pd.isna(row['rating']):
                         continue
-                    name = doc['company_name'].lower()
+                    name = row['name'].lower()
                     name = ''.join(char for char in name if char.isalnum())
-                    if name in company_ratings:
-                        self.docid_to_company_rating[doc['job_id']] = company_ratings[name]
-
-
-            print('Ratings for', len(self.docid_to_company_rating), 'companies loaded.')
+                    rating = round(float(row['rating']) / 5, 2)
+                    company_ratings[name] = rating
+    
+                self.docid_to_company_rating = {}
+                with jsonlines.open(DATASET_PATH) as f:
+                    for doc in tqdm(f):
+                        if pd.isna(doc['company_name']):
+                            continue
+                        name = doc['company_name'].lower()
+                        name = ''.join(char for char in name if char.isalnum())
+                        if name in company_ratings:
+                            self.docid_to_company_rating[doc['job_id']] = company_ratings[name]
+                print('Ratings for', len(self.docid_to_company_rating), 'companies loaded.')
+            else:
+                self.docid_to_company_rating = None
 
 
             self.pipeline = L2RRanker(
