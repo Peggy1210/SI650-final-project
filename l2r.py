@@ -17,7 +17,7 @@ import json
 class L2RRanker:
     def __init__(self, document_index: InvertedIndex, title_index: InvertedIndex,
                  document_preprocessor: Tokenizer, stopwords: set[str], ranker: Ranker,
-                 feature_extractor: 'L2RFeatureExtractor', docid_to_company_rating) -> None:
+                 feature_extractor: 'L2RFeatureExtractor', docid_to_company_rating = None) -> None:
         """
         Initializes a L2RRanker model.
 
@@ -130,48 +130,6 @@ class L2RRanker:
                     doc_term_counts[docid][q_term] = freq
 
         return doc_term_counts
-
-    # def output_data(self, training_data_filename: str, raw_text_filename: str, threshold: int=None) -> None:
-    #     raw_text_file = pd.read_csv(raw_text_filename)
-    #     # TODO: Convert the relevance data into the right format for training data preparation
-    #     query_to_document_relevance = {}
-    #     cnt = 0
-    #     with open(training_data_filename, 'r', newline='', errors='ignore') as f:
-    #         reader = csv.DictReader(f)
-    #         for row in reader:
-    #             # query = row['query']
-    #             cnt += 1
-    #             if threshold is not None and cnt > threshold: break
-    #             docid = int(row['job_id'])
-    #             query = raw_text_file[raw_text_file["ID"] == int(row['resume_id'])]["Clean_Resume"].item()
-    #             rel = int(float(row['rel']) * 2)
-    #             if query in query_to_document_relevance.keys():
-    #                 query_to_document_relevance[query].append((docid, rel))
-    #             else:
-    #                 query_to_document_relevance[query] = [(docid, rel)]
-
-    #     # TODO: prepare the training data by featurizing the query-doc pairs and
-    #     # getting the necessary datastructures
-    #     X_train, y_train, qgroups_train = self.prepare_training_data(query_to_document_relevance)
-
-    #     file_path = "l2r_train"
-    #     idx = 1
-    #     while os.path.exists(f'{file_path}{idx}'):
-    #         idx += 1
-            
-    #     os.makedirs(f'{file_path}{idx}', exist_ok=True)
-    #     data = {
-    #         "X_train": X_train,
-    #         "y_train": y_train,
-    #         "qgrouops_train": qgroups_train
-    #     } 
-        
-    #     # Convert and write JSON object to file
-    #     with open(f'{file_path}{idx}/training.json', "w") as outfile: 
-    #         json.dump(data, outfile, indent = 4)
-
-    # def load_model(self, model_name: str) -> None:
-    #     self.model.load(model_name)
 
     def train(self, training_data_filename: str, raw_text_filename: str, process_data_path: str = "l2r_training_data") -> None:
         """
@@ -286,8 +244,9 @@ class L2RRanker:
         # TODO: Make sure to add back the other non-top-100 documents that weren't re-ranked
         results += scores[FILTERED_INDEX:]
 
-        # rerank based on company ratings
-        results = self.rerank_from_ratings(results)
+        if self.docid_to_company_rating is not None:
+            # rerank based on company ratings
+            results = self.rerank_from_ratings(results)
 
         # TODO: Return the ranked documents
         return results
@@ -353,6 +312,7 @@ class L2RFeatureExtractor:
             self.fields = fields
         else:
             self.classifier = None
+
     # TODO: Article Length
     def get_article_length(self, docid: int) -> int:
         """
@@ -480,47 +440,6 @@ class L2RFeatureExtractor:
         """
         return self.doc_category_info[docid]
 
-    # # TODO Pagerank score
-    # def get_pagerank_score(self, docid: int) -> float:
-    #     """
-    #     Gets the PageRank score for the given document.
-
-    #     Args:
-    #         docid: The id of the document
-
-    #     Returns:
-    #         The PageRank score
-    #     """
-    #     return self.docid_to_network_features[docid]['pagerank']
-
-    # # TODO HITS Hub score
-    # def get_hits_hub_score(self, docid: int) -> float:
-    #     """
-    #     Gets the HITS hub score for the given document.
-
-    #     Args:
-    #         docid: The id of the document
-
-    #     Returns:
-    #         The HITS hub score
-    #     """
-    #     if docid not in self.docid_to_network_features.keys(): return 0
-    #     return self.docid_to_network_features[docid]['hub_score']
-
-    # # TODO HITS Authority score
-    # def get_hits_authority_score(self, docid: int) -> float:
-    #     """
-    #     Gets the HITS authority score for the given document.
-
-    #     Args:
-    #         docid: The id of the document
-
-    #     Returns:
-    #         The HITS authority score
-    #     """
-    #     if docid not in self.docid_to_network_features.keys(): return 0
-    #     return self.docid_to_network_features[docid]['authority_score']
-
     # TODO (HW3): Cross-Encoder Score
     def get_cross_encoder_score(self, docid: int, query: str) -> float:
         """
@@ -585,15 +504,6 @@ class L2RFeatureExtractor:
 
         # TODO: Pivoted Normalization
         feature_vector.append(self.get_pivoted_normalization_score(docid, doc_word_counts, query_parts))
-
-        # # TODO: Pagerank
-        # feature_vector.append(self.get_pagerank_score(docid))
-
-        # # TODO: HITS Hub
-        # feature_vector.append(self.get_hits_hub_score(docid))
-
-        # # TODO: HITS Authority
-        # feature_vector.append(self.get_hits_authority_score(docid))
 
         # TODO: (HW3) Cross-Encoder Score
         if self.ce_scorer is not None:

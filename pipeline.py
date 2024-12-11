@@ -9,6 +9,7 @@ import numpy as np
 from collections import Counter, defaultdict
 from tqdm import tqdm
 from pypdf import PdfReader
+from sklearn.preprocessing import LabelEncoder
 
 import nltk
 from nltk.corpus import stopwords
@@ -34,11 +35,15 @@ JOB_CATEGORY_PATH = DATA_PATH + 'job_categories.json'
 RELEVANCE_TRAIN_PATH = DATA_PATH + 'train_rel_temp.csv'
 TRAIN_NPY_PATH = DATA_PATH + ""
 ENCODED_DOCUMENT_EMBEDDINGS_NPY_PATH = DATA_PATH + 'description_embeddings.all-MiniLM-L6-v2.npy'
+AUGMENTED_ENCODED_DOCUMENT_EMBEDDINGS_NPY_PATH = DATA_PATH + 'augmented_description_embeddings.all-MiniLM-L6-v2.npy'
 DOC_IDS_PATH = DATA_PATH + 'job_posting_ids.txt'
-LLM_CLASSIFIER_PATH = '../posting_classifier/models/job_classification_11091504'
+LLM_CLASSIFIER_PATH = 'posting_classifier/models/job_classification_11091504'
 SKILLS_EMBEDDINGS_PATH = DATA_PATH + 'skills_embeddings.npy'
 RESUME_PATH = DATA_PATH + 'resume_data.csv'
 COMPANY_RATINGS_PATH = DATA_PATH + 'company_reviews.csv'
+
+category_info_filename = 'data/category_info.json'
+label2id_filename = 'data/label2id.json'
 
 TITLE_INDEXING_DIR = DATA_PATH + 'index-title'
 MAIN_INDEXING_DIR = DATA_PATH + 'index-description_mwf10'
@@ -53,7 +58,8 @@ class SearchEngine(BaseSearchEngine):
                  max_docs: int = -1,
                  ranker: str = 'BM25',
                  l2r: bool = False,
-                 aug_docs: bool = False,
+                 aug_docs: bool = True,
+                 company_ratings: bool = True,
                  ) -> None:
         # 1. Create a document tokenizer using document_preprocessor Tokenizers
         # 2. Load stopwords, network data, categories, etc
@@ -117,38 +123,9 @@ class SearchEngine(BaseSearchEngine):
             with jsonlines.open(DATASET_PATH) as f:
                 for doc in tqdm(f):
                     self.raw_text_dict[doc['job_id']] = doc['description']
-        # print('Loading raw text dict...')
-        # with open(RELEVANCE_TRAIN_PATH, 'r', encoding = "ISO-8859-1") as f:
-        #     data = csv.reader(f)
-        #     train_docs = set()
-        #     for idx, row in tqdm(enumerate(data)):
-        #         if idx == 0:
-        #             continue
-        #         train_docs.add(row[2])
 
-        # if not os.path.exists(CACHE_PATH + 'raw_text_dict_train.pkl'):
-        #     if not os.path.exists(CACHE_PATH):
-        #         os.makedirs(CACHE_PATH)
-        #     self.raw_text_dict = defaultdict()
-        #     file = gzip.open(DATASET_PATH, 'rt')
-        #     with jsonlines.Reader(file) as reader:
-        #         while True:
-        #             try:
-        #                 data = reader.read()
-        #                 if str(data['docid']) in train_docs:
-        #                     self.raw_text_dict[str(
-        #                         data['docid'])] = data['text'][:500]
-        #             except:
-        #                 break
-        #     pickle.dump(
-        #         self.raw_text_dict,
-        #         open(CACHE_PATH + 'raw_text_dict_train.pkl', 'wb')
-        #     )
-        # else:
-        #     self.raw_text_dict = pickle.load(
-        #         open(CACHE_PATH + 'raw_text_dict_train.pkl', 'rb')
-        #     )
-        # del train_docs, data
+        self.company_ratings = company_ratings
+        self.aug_docs = aug_docs
 
         print('Loading ranker...')
         self.set_ranker(ranker)
@@ -158,9 +135,12 @@ class SearchEngine(BaseSearchEngine):
 
     def set_ranker(self, ranker: str = 'BM25') -> None:
         if ranker == 'VectorRanker':
-            with open(ENCODED_DOCUMENT_EMBEDDINGS_NPY_PATH, 'rb') as f:
-                self.encoded_docs = np.load(f)
-                self.encoded_docs = np.squeeze(self.encoded_docs, axis=1) ########
+            if self.aug_docs:
+                with open(AUGMENTED_ENCODED_DOCUMENT_EMBEDDINGS_NPY_PATH, 'rb') as f:
+                    self.encoded_docs = np.load(f).astype(np.float32)
+            else:
+                with open(ENCODED_DOCUMENT_EMBEDDINGS_NPY_PATH, 'rb') as f:
+                    self.encoded_docs = np.load(f)
             with open(DOC_IDS_PATH, 'r') as f:
                 self.row_to_docid = [int(line.strip()) for line in f]
             self.ranker = VectorRanker(
@@ -197,47 +177,24 @@ class SearchEngine(BaseSearchEngine):
             self.pipeline = self.ranker
             self.l2r = False
         else:
-            # print('Loading categories...')
-            # if not os.path.exists(CACHE_PATH + 'docid_to_categories.pkl'):
-            #     docid_to_categories = defaultdict()
-            #     with gzip.open(DATASET_PATH, 'rt') as f:
-            #         for line in tqdm(f):
-            #             data = json.loads(line)
-            #             docid_to_categories[data['docid']] = data['categories']
-            #     pickle.dump(
-            #         docid_to_categories,
-            #         open(CACHE_PATH + 'docid_to_categories.pkl', 'wb')
-            #     )
-            # else:
-            #     docid_to_categories = pickle.load(
-            #         open(CACHE_PATH + 'docid_to_categories.pkl', 'rb')
-            #     )
-
-            # print('Loading recognized categories...')
-            # category_counts = Counter()
-            # for categories in tqdm(docid_to_categories.values()):
-            #     category_counts.update(categories)
-            # self.recognized_categories = set(
-            #     [category for category, count in category_counts.items()
-            #      if count > 1000]
-            # )
-            # if not os.path.exists(CACHE_PATH + 'doc_category_info.pkl'):
-            #     self.doc_category_info = defaultdict()
-            #     for docid, categories in tqdm(docid_to_categories.items()):
-            #         self.doc_category_info[docid] = [
-            #             category for category in categories if category in self.recognized_categories
-            #         ]
-            #     pickle.dump(
-            #         self.doc_category_info,
-            #         open(CACHE_PATH + 'doc_category_info.pkl', 'wb')
-            #     )
-            # else:
-            #     self.doc_category_info = pickle.load(
-            #         open(CACHE_PATH + 'doc_category_info.pkl', 'rb')
-            #     )
-            # del docid_to_categories, category_counts
-
             print('Initializing L2R ranker...')
+            print(' - loading categories...')
+            with open(JOB_CATEGORY_PATH) as f:
+                label2cat = json.load(f)
+            
+            fields = []
+            for i in label2cat:
+                fields.append(label2cat[i])
+            fields = list(set(fields))
+            with open(category_info_filename) as f:
+                temp = json.load(f)
+        
+            doc_category = {}
+            for key in temp:
+                doc_category[int(key)] = temp[key]
+            del temp
+            with open(label2id_filename) as f:
+                label2id = json.load(f)
             
             print(" - initializing skills scorer...")
             skills_embeddings = np.load(SKILLS_EMBEDDINGS_PATH)
@@ -250,13 +207,14 @@ class SearchEngine(BaseSearchEngine):
             print(' - initializing feature extractor')
             self.fe = L2RFeatureExtractor(self.main_index,
                             self.title_index,
-                            # doc_category_info,
+                            doc_category,
                             self.preprocessor,
                             self.stopwords,
                             # recognized_categories,
                             # network_features
                             self.cemodel,
-                            self.skill_scorer
+                            self.skill_scorer,
+                            LLM_CLASSIFIER_PATH, label2id, label2cat, fields
                         )
             
             print(' - initializing company ratings dict')
@@ -354,6 +312,7 @@ def interactive(**args):
 
 
     print("--------------")
+    feedback_dict = {}
     while True:
         mode = input("Choose your mode (pdf/text): ")
         if mode != "pdf" and mode != "text":
@@ -365,24 +324,15 @@ def interactive(**args):
             elif mode == "pdf":
                 query = input("Enter your resume file path: ")
                 results = search_obj.search_pdf(query)
-                
+            
             printSearchResponse(raw_data, results)
-                
-            while True:
-                ans = input("Provide feedback to get more relevant results? (Y/N): ")
-                if ans != "Y": break
-                feedback = input("Input feedback in order (Relevant = 1, Non-Relevant = 0)")
 
-                feedback_dict = {}
+            ans = input("Provide feedback to get more relevant results? (Y/N): ")
+            if ans == "Y":
+                feedback = input("Input feedback in order (Relevant = 1, Non-Relevant = 0)")
+            
                 for i, char in enumerate(feedback):
                     feedback_dict[results[i].docid] = int(char)
-
-                if mode == "text":
-                    updated_results = search_obj.search(query, feedback_dict)
-                elif mode == "pdf":
-                    updated_results = search_obj.search_pdf(query, feedback_dict)
-
-                printSearchResponse(raw_data, updated_results)
 
             ans = input("End the program? (Y/N): ")
             if ans == "Y": break
