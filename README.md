@@ -80,4 +80,4 @@ End the program? (Y/N):  N
 
 For the complete sample code, see `Interactive.ipynb`.
 
-> [IMPORTANT!] Since our feature space is relatively large, it takes a long time to generate the training data (almost 6 hours!). We saved the training data for L2R model with VectorRanker and document augmentation in a separate file `l2r_vr_train_data.zip`. You can unzip this file and save this in your root directory. This will help you save time~
+> [IMPORTANT!] Since our feature space is relatively large, it takes a long time to generate the training data (almost 6 hours!). We saved the training data for L2R model with VectorRanker and document augmentation in a separate file `l2r_training_data.zip`. You can unzip this file and save this in your root directory. This will help you save time~
