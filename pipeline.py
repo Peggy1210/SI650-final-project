@@ -319,10 +319,10 @@ def interactive(**args):
         else:
             if mode == "text":
                 query = input("Enter your resume text: ")
-                results = search_obj.search(query)
+                results = search_obj.search(query, feedback_dict)
             elif mode == "pdf":
                 query = input("Enter your resume file path: ")
-                results = search_obj.search_pdf(query)
+                results = search_obj.search_pdf(query, feedback_dict)
             
             printSearchResponse(raw_data, results)
 
