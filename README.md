@@ -8,7 +8,9 @@ In our project, we want to exploit the advantages of IR system. The users can di
 
 ## How to Use
 
-Download our data [here](https://drive.google.com/drive/folders/1Y-3nfzstZ-iB-_sMdopbGOvFIIPpnFxp?usp=drive_link).
+### Data
+
+All data used in this repo is stored in `data.zip`. To run the program, unzip `data.zip` and put `\data` in root directory.
 
 ### Run with Modules
 
